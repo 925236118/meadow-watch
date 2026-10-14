@@ -1,0 +1,10 @@
+.godot/
+*.tmp
+build/
+*.log
+assets/fonts/msyh.ttc
+assets/fonts/msyh.ttc.import
+docs/*.json
+docs/*_atlas.png
+docs/check_atlas_*.png
+docs/item-atlas-*.png
