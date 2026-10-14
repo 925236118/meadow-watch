@@ -33,18 +33,25 @@ func run() -> void:
 	var visible_text: String=""
 	for child: Node in game.modal_body.get_children():
 		if child is Label or child is Button: visible_text+=child.text+"\n"
-	check(visible_text.contains("当前金币：90") and visible_text.contains("当前矿石：0") and visible_text.contains("持有 5 颗") and visible_text.contains("20 金币 + 3 矿石"),"shop displays holdings and additive upgrade cost")
+	check(visible_text.contains("当前金币：90") and visible_text.contains("当前矿石：0") and visible_text.contains("持有 2 颗"),"shop displays holdings")
+	game._shop_page("tools");await process_frame
+	var tool_text: String=""
+	for card: Node in game.modal_body.get_children():
+		for child: Node in card.get_children():
+			if child is Label or child is Button: tool_text+=child.text+"\n"
+	check(tool_text.contains("20 金币 + 3 矿石") and tool_text.contains("当前：") and tool_text.contains("升级后："),"tool page compares current and upgraded effects")
+	game._shop_page("seeds")
 	game._buy(0);await process_frame
-	check(game.state.gold==75 and game.state.seeds[0]==8 and game.current_menu=="shop","shop purchase refreshes holdings")
+	check(game.state.gold==75 and game.state.seeds[0]==5 and game.current_menu=="shop","shop purchase refreshes holdings")
 	game.modal_undo_button.pressed.emit();await process_frame
-	check(game.state.gold==90 and game.state.seeds[0]==5 and game.current_menu=="shop","modal undo restores purchase and keeps shop open")
+	check(game.state.gold==90 and game.state.seeds[0]==2 and game.current_menu=="shop","modal undo restores purchase and keeps shop open")
 	game._close()
-	game._seed(1)
-	check(game.seed_label.text.contains("卷心菜") and game.seed_button.text.contains("5 颗"),"selected seed always visible after switching")
+	game._seed(5)
+	check(game.seed_label.text.contains("小麦") and game.seed_button.text.contains("1 颗"),"selected seed always visible after switching")
 	game._on_plot(3)
-	check(game.seed_label.text.contains("剩余 4 颗"),"planting refreshes visible seed count")
+	check(game.seed_label.text.contains("剩余 0 颗"),"planting refreshes visible seed count")
 	game._undo()
-	check(game.seed_label.text.contains("剩余 5 颗"),"undo refreshes visible seed count")
+	check(game.seed_label.text.contains("剩余 1 颗"),"undo refreshes visible seed count")
 	var before_walk: Dictionary=game.state.to_data()
 	var walk_ok: bool=true
 	var stops: Dictionary={}
@@ -63,15 +70,36 @@ func run() -> void:
 	game.state.ap=8;game.farm.update_hover(Vector2(360,120))
 	check(game.hover_label.text.contains("鲜鱼 ×1") and game.hover_label.text.contains("同种作物 ×2") and game.hover_label.text.contains("2 AP"),"cooking hover explains ingredients")
 	game.farm.update_hover(Vector2(801,357))
-	check(game.hover_label.text.contains("4 金币"),"animal hover displays feed cost")
+	check(game.hover_label.text.contains("购买小鸡") and game.hover_label.text.contains("0/4"),"empty animal yard guides purchase without AP cost")
 	game.farm.hover_active=false;game.hover_panel.hide()
-	for kind: String in ["seeds","bag","shop","investigate","expose","rest","options"]:
+	check(game.weather_label.text.contains("明日 晴天") and game.mail_button.text.contains("未读 3"),"HUD shows two-day weather and unread letters")
+	game.farm.hover_active=true;game.farm.update_hover(Vector2(288,132))
+	check(game.hover_label.text.contains("信箱") and game.hover_label.text.contains("0 AP"),"physical mailbox has free interaction tooltip")
+	game.farm.hover_active=false;game.hover_panel.hide()
+	for kind: String in ["seeds","bag","shop","investigate","gifts","expose","rest","mailbox","villagers","person","requests","chains","options"]:
 		game._menu(kind);await process_frame
 		check(game.shade.visible and game.modal_body.get_child_count()>0,"menu renders: "+kind)
 	# Clicking a modal-covered plot must not consume AP.
 	var before: int=game.state.ap
 	Input.parse_input_event(click);await process_frame
 	check(game.state.ap==before,"modal intercepts farm clicks")
+	game._menu("villagers");game._village_action("talk",0)
+	check(game.current_menu=="story" and game.state.village.people.elder.points==2,"village conversation opens dialogue and adds affection")
+	var talk_ap: int=game.state.ap
+	game._menu("villagers");game._village_action("talk",0)
+	check(game.state.ap==talk_ap and game.state.village.people.elder.points==2 and game.state.village.talk_count==2,"UI repeated conversation uses free quota without gaining affection again")
+	game._menu("villagers");game._village_action("talk",0)
+	game._menu("villagers");game._village_action("talk",0)
+	check(game.state.ap==talk_ap-1 and game.state.village.people.elder.points==2,"UI fourth conversation costs one AP and does not farm affection")
+	check(game._stars(40)=="★★★★★" and game._stars(0)=="☆☆☆☆☆","affection UI renders exactly five stars")
+	game._menu("person");game.state.inventory.egg=1;game._village_action("gift",0,"egg")
+	check(game.current_menu=="person" and game.state.village.people.elder.points==6,"gift menu refreshes affection and stays open")
+	game.modal_undo_button.pressed.emit();await process_frame
+	check(game.state.village.people.elder.points==2 and game.state.inventory.egg==1,"village modal undo restores gift and affection")
+	game._open_letter(1)
+	check(game.current_menu=="mailbox" and game.state.village.mail[0].read,"selecting letter updates read status and renders detail")
+	game._shop_page("rumors")
+	check(game.current_menu=="shop" and game.shop_tab=="rumors","rumor shop page renders")
 	game._close();game._on_place("fish");game._deliver(0)
 	check(game.state.delivered,"UI activity plus order delivery works")
 	game._menu("rest");game._rest();await process_frame

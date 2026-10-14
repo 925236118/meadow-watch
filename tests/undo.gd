@@ -11,11 +11,13 @@ func _initialize() -> void:
 	for action: String in ["till","plant","water","harvest","fish","mine","cook","eat","feed","comfort","investigate","scarecrow","buy","sell","upgrade","deliver"]:
 		var s: RefCounted=State.new()
 		match action:
+			"plant": s.seeds[2]=1
+			"feed": s.chickens=2
 			"cook","sell","deliver": s.inventory.fish=2
 			"eat": s.ap=0;s.inventory.meal=1
-			"comfort": s.event="噪声扰民"
+			"comfort": s.chickens=2;s.event="噪声扰民"
 			"investigate": s.event="封锁矿洞"
-			"scarecrow","upgrade": s.inventory.ore=10
+			"scarecrow","upgrade": s.inventory.ore=10;s.inventory.wood=10
 		var before: Dictionary=s.to_data()
 		var ok: bool=false
 		match action:

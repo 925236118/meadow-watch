@@ -1,6 +1,7 @@
 extends Control
 ## Fixed-camera diorama, drawn at an integer pixel scale.
 signal plot_clicked(index: int)
+signal tree_clicked(index: int)
 signal place_clicked(place: String)
 signal hovered(text: String)
 signal hover_info(text: String, point: Vector2, available: bool)
@@ -8,7 +9,7 @@ var selected_seed: int = 0
 var hover_active: bool = false
 var state: RefCounted
 var selected: int = -1
-var tool: String = "till"
+var tool: String = "auto"
 var time: float = 0.0
 var textures: Dictionary = {}
 var pond_bank: StyleBoxTexture
@@ -27,6 +28,10 @@ const FARM: Vector2 = Vector2(110,72)
 const SPRITES: String = "res://assets/sprites/"
 const POND: Rect2 = Rect2(12,96,80,64)
 const MINE: Rect2 = Rect2(244,20,56,56)
+const MAILBOX: Rect2 = Rect2(89,34,15,26)
+const HOME: Rect2=Rect2(102,3,62,65)
+const WoodenHouse=preload("res://scripts/wooden_house.gd")
+const FOREST: Array[Vector2]=[Vector2(8,4),Vector2(41,10),Vector2(8,51),Vector2(44,52)]
 
 func _ready() -> void:
 	ambient_rng.randomize()
@@ -48,7 +53,10 @@ func _ready() -> void:
 		["coop","Tilesets/Building parts/Animal Structures/Chikcen_Houses.png"],
 		["chicken","Animals/Chicken/chicken default.png"],
 		["rocks","Objects/Mushrooms, Flowers, Stones.png"],
-		["player","Characters/Basic Charakter Spritesheet.png"]
+		["player","Characters/Basic Charakter Spritesheet.png"],
+		["mailbox","Tilesets/Building parts/Mailbox Animation Frames.png"],
+		["house_roof","Tilesets/Building parts/Wooden_House_Roof_Tilset.png"],
+		["house_walls","Tilesets/Building parts/Wooden_House_Walls_Tilset.png"]
 	]: textures[pair[0]] = load(SPRITES+pair[1])
 	pond_bank=StyleBoxTexture.new()
 	pond_bank.texture=textures.grass
@@ -56,6 +64,10 @@ func _ready() -> void:
 	pond_bank.texture_margin_left=7;pond_bank.texture_margin_right=7
 	pond_bank.texture_margin_top=7;pond_bank.texture_margin_bottom=7
 	pond_bank.draw_center=false
+	_add_buildings()
+
+func _add_buildings() -> void:
+	WoodenHouse.create(self,Vector2(94,3),"Farmhouse")
 
 func _process(delta: float) -> void:
 	time += delta
@@ -100,17 +112,21 @@ func _draw() -> void:
 	# Paths connect home, cultivated plots, the animal yard and river.
 	for x: int in range(2,19):
 		for y: int in [9,10]:
-			sprite("soil",Vector2(x*16,y*16),Rect2((x%5)*16,80,16,16),Color("f8edcc"))
+			sprite("soil",Vector2(x*16,y*16),Rect2((x%3)*16,80,16,16),Color("f8edcc"))
 	for y: int in range(2,10): sprite("soil",Vector2(94,y*16),Rect2(16,80,16,16))
 	_draw_pond()
 	# Timber cottage assembled from the supplied building tiles.
-	sprite("coop",Vector2(105,12),Rect2(64,0,64,80),Color.WHITE,2.0)
-	sprite("trees",Vector2(151,17),Rect2(48,0,32,32))
-	sprite("trees",Vector2(185,14),Rect2(80,0,32,32))
+	sprite("mailbox",Vector2(83,12),Rect2(0,48,32,48))
+	var unread: int=state.Village.unread(state)
+	if unread>0:
+		draw_circle(Vector2(97,32)*SCALE,9,Color("b36a51"))
+		text_at(str(unread),Vector2(95,34),Color("fff2c9"),12)
+	sprite("trees",Vector2(167,17),Rect2(48,0,32,32))
+	sprite("trees",Vector2(202,14),Rect2(80,0,32,32))
 	sprite("coop",Vector2(245,95),Rect2(144,80,48,48))
 	var frame: int = int(time*2)%4
-	sprite("chicken",Vector2(252+sin(time)*2,139),Rect2(frame*16,0,16,16))
-	sprite("chicken",Vector2(278,143+cos(time)*2),Rect2(frame*16,32,16,16))
+	for i: int in range(state.chickens):
+		sprite("chicken",Vector2(246+i%2*25+sin(time+i)*2,132+i/2*16+cos(time+i)*2),Rect2(frame*16,(i%2)*32,16,16))
 	# A rocky hill with a visible timber-supported entrance, not a loose rock pile.
 	_draw_mine()
 	draw_rect(Rect2(852,15,62,52),Color("6f8372"))
@@ -120,8 +136,14 @@ func _draw() -> void:
 	for i: int in range(4):
 		draw_circle(Vector2(870+sin(time+i)*8,14+fmod(time*3+i*5,14)),6+i,Color(0.6,0.65,0.56,0.12))
 	# Border foliage, flowers, fences and a stationary farm keeper.
-	for pos: Vector2 in [Vector2(8,4),Vector2(41,10),Vector2(8,51),Vector2(44,52),Vector2(285,47),Vector2(10,151),Vector2(70,152),Vector2(212,144),Vector2(283,152)]:
+	for pos: Vector2 in [Vector2(285,47),Vector2(10,151),Vector2(70,152),Vector2(212,144),Vector2(283,152)]:
 		sprite("trees",pos,Rect2(16,0,32,32))
+	for i: int in range(FOREST.size()):
+		var pos: Vector2=FOREST[i]
+		if state.day>=state.tree_ready_days[i]: sprite("trees",pos,Rect2(16,0,32,32))
+		else:
+			sprite("trees",pos+Vector2(8,16),Rect2(0,96,16,16))
+			text_at("%d天"%(state.tree_ready_days[i]-state.day),pos+Vector2(5,29),Color("eee3b8"),13)
 	for pos: Vector2 in [Vector2(65,88),Vector2(218,69),Vector2(227,153),Vector2(57,146),Vector2(32,88)]:
 		sprite("rocks",pos,Rect2(0,48,16,16))
 	for i: int in range(7):
@@ -132,18 +154,21 @@ func _draw() -> void:
 		var p: Dictionary = state.plots[i]
 		var pos: Vector2 = FARM+Vector2(i%6*16,i/6*16)
 		if p.tilled:
-			sprite("soil",pos,Rect2(16,16,16,16),Color("c1a887") if p.water else Color.WHITE)
+			sprite("soil",pos,Rect2(16,16,16,16),Color("c1a887") if state.is_moist(p) else Color.WHITE)
 			draw_rect(Rect2(pos*SCALE+Vector2(3,3),Vector2(42,42)),Color(0.48,0.32,0.18,0.13),false,1)
 		else:
 			draw_rect(Rect2(pos*SCALE+Vector2(3,3),Vector2(42,42)),Color(0.4,0.56,0.22,0.3),false,1)
 		if p.crop >= 0:
 			var crop: Dictionary = state.CROPS[p.crop]
-			var stage: int = mini(4, int(float(p.growth)/crop.days*3)+1) if p.growth > 0 else 0
+			var stage: int = mini(4, int(float(p.growth)/state.growth_target(p)*3)+1) if p.growth > 0 else 0
+			if p.get("regrowing",false): stage=mini(4,2+int(float(p.growth)/state.growth_target(p)*2))
 			if p.crop != 2: stage = mini(stage,3)
-			sprite("crops",pos,Rect2(stage*16,crop.row*16,16,16))
-			if p.growth >= crop.days:
+			if p.crop==2 and stage>=3:
+				sprite("crops",pos-Vector2(0,16),Rect2(stage*16,0,16,32))
+			else: sprite("crops",pos,Rect2(stage*16,crop.row*16,16,16))
+			if p.growth >= state.growth_target(p):
 				draw_circle(pos*SCALE+Vector2(39,8),3+sin(time*3),Color("fff2a1"))
-			elif p.water:
+			elif state.is_moist(p):
 				draw_circle(pos*SCALE+Vector2(39,39),3,Color("7fc9c5"))
 		if i == selected:
 			draw_rect(Rect2(pos*SCALE,Vector2(48,48)),Color("fff4bd"),false,3)
@@ -153,11 +178,12 @@ func _draw() -> void:
 		draw_circle(Vector2(656,243),12,Color("eed38f"))
 	var actor_frame: int=int(time*6)%4 if actor_walking else 0
 	sprite("player",actor_feet.round()-Vector2(24,32),Rect2(actor_frame*48,actor_direction*48,48,48))
+	text_at("木材林 · 砍伐",Vector2(13,87),Color("f7edd4"),14)
 	text_at("田园小屋 · 烹饪",Vector2(101,12))
 	text_at("旧矿洞 · 挖矿",Vector2(236,17))
 	text_at("河岸 · 钓鱼",Vector2(22,93))
-	text_at("动物小院 · 饲养",Vector2(238,86))
-	text_at("村口 · 调查",Vector2(119,177))
+	text_at("动物小院 · %d/4 只"%state.chickens,Vector2(234,86))
+	text_at("村口 · 前往村庄 →",Vector2(112,183))
 	if state.weather == "小雨":
 		draw_rect(Rect2(0,0,960,552),Color(0.2,0.38,0.42,0.10))
 		for i: int in range(50):
@@ -211,12 +237,15 @@ func _gui_input(e: InputEvent) -> void:
 	if e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_LEFT:
 		var p: Vector2 = e.position/SCALE
 		var tile: int = _plot_at(p)
+		var tree: int=_tree_at(p)
 		if tile >= 0: plot_clicked.emit(tile)
+		elif tree>=0: tree_clicked.emit(tree)
 		elif POND.has_point(p): place_clicked.emit("fish")
 		elif MINE.has_point(p): place_clicked.emit("mine")
-		elif Rect2(98,10,47,58).has_point(p): place_clicked.emit("cook")
+		elif MAILBOX.has_point(p): place_clicked.emit("mailbox")
+		elif HOME.has_point(p): place_clicked.emit("cook")
 		elif Rect2(235,82,78,80).has_point(p): place_clicked.emit("feed")
-		elif p.y > 158: place_clicked.emit("investigate")
+		elif p.y > 158: place_clicked.emit("village")
 		accept_event()
 
 func update_hover(point: Vector2) -> void:
@@ -227,14 +256,19 @@ func update_hover(point: Vector2) -> void:
 	var title: String=""
 	var extra: String=""
 	var reason: String=""
-	if selected>=0:
-		action=tool
+	var tree: int=_tree_at(p)
+	if tree>=0:
+		action="chop";title="木材林 · 砍伐";extra="获得木材 ×3 · 用于升级 / 出售"
+		if state.day<state.tree_ready_days[tree]: reason="正在恢复，第 %d 天可再次砍伐"%state.tree_ready_days[tree]
+	elif selected>=0:
+		action=state.suggest_action(selected) if tool=="auto" else tool
 		var tile: Dictionary=state.plots[selected]
-		title="农田 · "+{"till":"开垦","plant":"播种","water":"浇水","harvest":"收获"}.get(tool,tool)
+		title="农田 · "+{"till":"开垦","plant":"播种","water":"浇水","harvest":"收获"}.get(action,action)
 		if tile.crop>=0:
 			var crop: Dictionary=state.CROPS[tile.crop]
-			extra="%s · 生长 %d/%d 天 · %s"%[crop.name,tile.growth,crop.days,"已浇水" if tile.water else "未浇水"]
-		match tool:
+			extra="%s · %s %d/%d 天 · %s"%[crop.name,"再熟" if tile.get("regrowing",false) else "生长",tile.growth,state.growth_target(tile),"湿润" if state.is_moist(tile) else "需浇水"]
+			if crop.get("moisture_days",1)>1: extra+="（可保湿两天）"
+		match action:
 			"till":
 				if tile.tilled: reason="已经开垦，请播种或照料作物"
 			"plant":
@@ -244,17 +278,23 @@ func update_hover(point: Vector2) -> void:
 				elif state.seeds[selected_seed]<=0: reason="种子不足，去杂货铺补充"
 			"water":
 				if tile.crop<0: reason="这里没有作物，请先播种"
-				elif tile.water: reason="今天已经浇水"
-				elif tile.growth>=state.CROPS[tile.crop].days: reason="已经成熟，请收获"
+				elif state.is_moist(tile): reason="土壤仍湿润，今天不用浇水"
+				elif tile.growth>=state.growth_target(tile): reason="已经成熟，请收获"
 			"harvest":
 				if tile.crop<0: reason="这里没有可收获的作物"
-				elif tile.growth<state.CROPS[tile.crop].days: reason="尚未成熟，浇水后跨天生长"
+				elif tile.growth<state.growth_target(tile): reason="尚未成熟，浇水后跨天生长"
 	elif POND.has_point(p):
 		action="fish";title="水塘 · 钓鱼";extra="材料：无需材料"
+		if state.Village.closed(state,"fish"): reason="鱼塘正在清洁，日期见信箱"
+		elif state.Village.boost(state,"fish")>0: extra+=" · 繁殖期产量 +2"
 	elif MINE.has_point(p):
 		action="mine";title="矿洞 · 挖矿";extra="材料：无需材料"
 		if state.event=="封锁矿洞": reason="矿洞已封锁，先调查矿洞线索"
-	elif Rect2(98,10,47,58).has_point(p):
+		elif state.Village.closed(state,"mine"): reason="矿洞正在修缮，日期见信箱"
+		elif state.Village.boost(state,"mine")>0: extra+=" · 新矿脉产量 +2"
+	elif MAILBOX.has_point(p):
+		action="mailbox";title="信箱 · 阅读信件";extra="未读 %d 封 · 阅读 0 AP"%state.Village.unread(state)
+	elif HOME.has_point(p):
 		action="cook";title="田园小屋 · 烹饪"
 		extra="材料：鲜鱼 ×1 或同种作物 ×2"
 		var ingredient: bool=state.inventory.fish>0
@@ -263,23 +303,30 @@ func update_hover(point: Vector2) -> void:
 		elif not ingredient: reason="食材不足（鲜鱼持有 %d）"%state.inventory.fish
 	elif Rect2(235,82,78,80).has_point(p):
 		action="feed";title="动物小院 · 饲养";extra="饲料费：4 金币（持有 %d）"%state.gold
-		if state.fed: reason="今天已经喂养并收集鸡蛋"
+		if state.chickens==0:
+			action="chickens";title="动物小院 · 购买小鸡";extra="当前 0/4 只 · 点击打开小鸡商店"
+		elif state.fed: reason="今天已经喂养并收集鸡蛋"
 		elif state.gold<4: reason="金币不足以购买饲料"
 	elif p.y>158:
-		action="investigate";title="村口 · 打开调查线索";extra="打开证据册：0 AP\n每次调查：4 AP，无需材料"
+		action="villagers";title="村口 · 村民与互助";extra="打开村民面板：0 AP\n全村前三次聊天免费，每人每天一次对话好感"
 	if action.is_empty():
 		mouse_default_cursor_shape=Control.CURSOR_ARROW
 		hover_info.emit("",point,true);return
 	if not state.outcome.is_empty(): reason="故事已结束"
-	elif action!="investigate" and state.ap<state.cost(action):
+	elif action not in ["investigate","villagers","mailbox"] and state.ap<state.cost(action):
 		reason="AP 不足，可用 Ctrl+Z 撤回"
 	var text: String=title+"\n"
-	if action!="investigate": text+="消耗：%d AP（当前 %d / 10）\n"%[state.cost(action),state.ap]
+	if action not in ["investigate","villagers","mailbox"]: text+="消耗：%d AP（当前 %d / %d）\n"%[state.cost(action),state.ap,state.max_ap]
 	if extra.is_empty(): extra="材料：无需材料"
 	text+=extra+"\n"+("点击执行" if reason.is_empty() else reason)
 	mouse_default_cursor_shape=(Control.CURSOR_CROSS if selected>=0 else Control.CURSOR_POINTING_HAND) if reason.is_empty() else Control.CURSOR_FORBIDDEN
 	hovered.emit(title)
 	hover_info.emit(text,point,reason.is_empty())
+
+func _tree_at(p: Vector2) -> int:
+	for i: int in range(FOREST.size()):
+		if Rect2(FOREST[i],Vector2(32,32)).has_point(p): return i
+	return -1
 
 func _plot_at(p: Vector2) -> int:
 	if not Rect2(FARM,Vector2(96,64)).has_point(p): return -1
